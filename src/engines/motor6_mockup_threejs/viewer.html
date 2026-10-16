@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Studio Kustom - Three.js 3D Headless Mockup Viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+    }
+    #viewport {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./node_modules/three/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="viewport"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { setupMugScene } from './scenes/mug_scene.js';
+    import { setupCardScene } from './scenes/card_scene.js';
+    import { setupPosterScene } from './scenes/poster_scene.js';
+    import { setupButtonScene } from './scenes/button_scene.js';
+
+    window.__RENDER_READY__ = false;
+    window.__RENDER_ERROR__ = null;
+
+    async function init() {
+      try {
+        const config = window.__SCENE_CONFIG__ || {};
+        const sceneType = config.scene || 'mug';
+        const width = config.width || 1024;
+        const height = config.height || 1024;
+        const transparent = config.transparent !== false;
+
+        const scene = new THREE.Scene();
+        if (!transparent) {
+          scene.background = new THREE.Color(config.background_color || 0xf4f4f7);
+        }
+
+        const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100);
+
+        const renderer = new THREE.WebGLRenderer({
+          antialias: true,
+          alpha: transparent,
+          preserveDrawingBuffer: true,
+          powerPreference: 'high-performance'
+        });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(2.0);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.25;
+
+        const container = document.getElementById('viewport');
+        container.appendChild(renderer.domElement);
+
+        // Carregamento assíncrono de texturas com nitidez cristalina
+        const texLoader = new THREE.TextureLoader();
+        const loadTexture = (dataUri) => {
+          if (!dataUri) return Promise.resolve(null);
+          return new Promise((resolve) => {
+            texLoader.load(
+              dataUri,
+              (tex) => {
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.generateMipmaps = true;
+                tex.minFilter = THREE.LinearMipmapLinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                tex.anisotropy = 16;
+                resolve(tex);
+              },
+              undefined,
+              () => resolve(null)
+            );
+          });
+        };
+
+        const [artTex, backTex] = await Promise.all([
+          loadTexture(config.art_data_url),
+          loadTexture(config.back_art_data_url)
+        ]);
+
+        let artsList = [];
+        if (Array.isArray(config.arts_data_urls) && config.arts_data_urls.length > 0) {
+          artsList = await Promise.all(config.arts_data_urls.map(url => loadTexture(url)));
+        }
+
+        const textures = { art: artTex, back_art: backTex, arts: artsList };
+
+        if (sceneType === 'mug' || sceneType === 'mug_trio') {
+          setupMugScene(scene, camera, config, textures);
+        } else if (sceneType === 'card' || sceneType === 'tcg') {
+          setupCardScene(scene, camera, config, textures);
+        } else if (sceneType === 'poster') {
+          setupPosterScene(scene, camera, config, textures);
+        } else if (sceneType === 'button' || sceneType === 'buttons' || sceneType === 'pin') {
+          setupButtonScene(scene, camera, config, textures);
+        } else {
+          throw new Error('Cena desconhecida: ' + sceneType);
+        }
+
+        // Renderização única de alta fidelidade
+        renderer.render(scene, camera);
+
+        // Aguarda 1 frame para garantir que os buffers de renderização estejam preenchidos
+        requestAnimationFrame(() => {
+          renderer.render(scene, camera);
+          window.__RENDER_READY__ = true;
+        });
+      } catch (err) {
+        window.__RENDER_ERROR__ = err.message || String(err);
+        window.__RENDER_READY__ = true;
+      }
+    }
+
+    window.triggerRender = init;
+
+    // Se a configuração já estiver injetada no window, inicia imediatamente
+    if (window.__SCENE_CONFIG__) {
+      init();
+    }
+  </script>
+</body>
+</html>
